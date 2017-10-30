@@ -1,4 +1,4 @@
-FROM python:3.6
+FROM bluelens/tensorflow:1.3.0-py3
 MAINTAINER bluehackmaster <master@bluehack.net>
 
 USER root
@@ -10,5 +10,6 @@ WORKDIR /usr/src/app
 COPY . /usr/src/app
 
 RUN pip install -r requirements.txt
+RUN pip install --upgrade google-cloud-bigquery
 
 CMD ["python", "main.py"]

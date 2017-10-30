@@ -4,6 +4,7 @@ import uuid
 import os
 from google.cloud import bigquery
 
+import uuid
 import logging
 import redis
 import json
@@ -34,7 +35,7 @@ PRODUCT_NO = 'product_no'
 MAIN = 'main'
 NATION = 'nation'
 
-SPAWNING_CRITERIA = 10000
+SPAWNING_CRITERIA = 10
 
 REDIS_IMAGE_CROP_QUEUE = 'bl:image:crop:queue'
 
@@ -43,17 +44,22 @@ api_instance = stylelens_index.ImageApi()
 REDIS_SERVER = os.environ['REDIS_SERVER']
 SUBSCRIBE_TOPIC = os.environ['SUBSCRIBE_TOPIC']
 
+AWS_ACCESS_KEY = os.environ['AWS_ACCESS_KEY']
+AWS_SECRET_ACCESS_KEY = os.environ['AWS_SECRET_ACCESS_KEY']
+
 logging.basicConfig(filename='./log/main.log', level=logging.DEBUG)
 rconn = redis.StrictRedis(REDIS_SERVER, port=6379)
 
 def job(info):
   site_code = info['code']
   print(site_code)
+  logging.debug(site_code)
 
   client = bigquery.Client.from_service_account_json(
       'BlueLens-d8117bd9e6b1.json')
 
-  query = 'SELECT * FROM stylelens.' + site_code
+  # query = 'SELECT * FROM stylelens.' + site_code
+  query = 'SELECT * FROM stylelens.8seconds LIMIT 30'
 
   query_job = client.run_async_query(str(uuid.uuid4()), query)
 
@@ -81,7 +87,7 @@ def job(info):
     push_image_to_queue(image_info)
 
     if i % SPAWNING_CRITERIA == 0:
-      spawn_cropper(i)
+      spawn_cropper(str(uuid.uuid4()))
     i = i + 1
 
 def push_image_to_queue(image_info):
@@ -115,42 +121,47 @@ def image_class_to_json_str(image):
   return s
 
 
-def spawn_cropper(index):
-  print('spawn_cropper: ' + str(index))
+def spawn_cropper(uuid):
 
   pool = spawning_pool.SpawningPool()
 
-  project_name = 'bl-cropper'
+  project_name = 'bl-cropper-' + uuid
+  print('spawn_cropper: ' + project_name)
 
-  pool.setServerUrl('redis-master')
+  pool.setServerUrl('bl-mem-store-master')
   pool.setApiVersion('v1')
-  pool.setKind('pod')
+  pool.setKind('Pod')
   pool.setMetadataName(project_name)
   pool.setMetadataNamespace('index')
   pool.addMetadataLabel('name', project_name)
   container = pool.createContainer()
   pool.setContainerName(container, project_name)
-  pool.addContainerEnv(container, 'key1', 'xxxxx')
-  pool.addContainerEnv(container, 'key2', 'yyyyy')
+  pool.addContainerEnv(container, 'AWS_ACCESS_KEY', AWS_ACCESS_KEY)
+  pool.addContainerEnv(container, 'AWS_SECRET_ACCESS_KEY', AWS_SECRET_ACCESS_KEY)
+  pool.addContainerEnv(container, 'REDIS_SERVER', REDIS_SERVER)
   pool.setContainerImage(container, 'bluelens/bl-cropper:latest')
   pool.addContainer(container)
   pool.setRestartPolicy('Never')
-  # pool.spawn()
+  pool.spawn()
 
 def sub(rconn):
+  logging.debug('start subscription')
+
   pubsub = rconn.pubsub()
   pubsub.subscribe([SUBSCRIBE_TOPIC])
 
   for item in pubsub.listen():
-    logging.debug('%s' % (item['data']))
-    print('%s' % (item['data']))
+    data = item['data']
+    logging.debug(data)
+    print(data)
 
     try:
-      if (isinstance( item['data'], int )):
-        print('type is not json')
-      else:
-        data = json.loads(item['data'])
-        job(data)
+      if (type(data) is bytes):
+        d = json.loads(item['data'].decode('utf-8'))
+        job(d)
+      elif (type(data) is str):
+        d = json.loads(data)
+        job(d)
     except ValueError:
       print("wait subscribe")
 

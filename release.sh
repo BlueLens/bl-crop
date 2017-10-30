@@ -3,6 +3,7 @@
 export ORG="bluelens"
 export IMAGE="bl-crop"
 export TAG='latest'
+export NAMESPACE="index"
 
 docker login
 
