@@ -1,5 +1,5 @@
 beautifulsoup4==4.6.0
-bluelens-spawning-pool==1.0.5
+bluelens-spawning-pool==1.0.7
 cachetools==2.0.1
 certifi==2017.7.27.1
 chardet==3.0.4

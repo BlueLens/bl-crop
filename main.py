@@ -27,7 +27,7 @@ HOST_URL = 'host_url'
 TAG = 'tag'
 SUB_CATEGORY = 'sub_category'
 PRODUCT_NAME = 'product_name'
-IMAGE_URL = 'image_url'
+IMAGE_URL = 'image'
 PRODUCT_PRICE = 'product_price'
 CURRENCY_UNIT = 'currency_unit'
 PRODUCT_URL = 'product_url'
@@ -75,7 +75,7 @@ def job(info):
     image_info.host_url = str(row[0])
     image_info.tags = str(row[1]).split(',')
     image_info.product_name = str(row[3])
-    image_info.image_url = str(row[4])
+    image_info.image = str(row[4])
     image_info.product_price = str(row[5])
     image_info.currency_unit = str(row[6])
     image_info.product_url = str(row[7])
@@ -134,11 +134,13 @@ def spawn_cropper(uuid):
   pool.setMetadataName(project_name)
   pool.setMetadataNamespace('index')
   pool.addMetadataLabel('name', project_name)
+  pool.addMetadataLabel('SPAWN_ID', uuid)
   container = pool.createContainer()
   pool.setContainerName(container, project_name)
   pool.addContainerEnv(container, 'AWS_ACCESS_KEY', AWS_ACCESS_KEY)
   pool.addContainerEnv(container, 'AWS_SECRET_ACCESS_KEY', AWS_SECRET_ACCESS_KEY)
   pool.addContainerEnv(container, 'REDIS_SERVER', REDIS_SERVER)
+  pool.addContainerEnv(container, 'SPAWN_ID', uuid)
   pool.setContainerImage(container, 'bluelens/bl-cropper:latest')
   pool.addContainer(container)
   pool.setRestartPolicy('Never')
