@@ -8,6 +8,7 @@ import uuid
 import logging
 import redis
 import json
+import time
 import stylelens_index
 from bluelens_spawning_pool import spawning_pool
 
@@ -35,7 +36,7 @@ PRODUCT_NO = 'product_no'
 MAIN = 'main'
 NATION = 'nation'
 
-SPAWNING_CRITERIA = 10
+SPAWNING_CRITERIA = 100
 
 REDIS_IMAGE_CROP_QUEUE = 'bl:image:crop:queue'
 
@@ -58,9 +59,11 @@ def job(info):
   client = bigquery.Client.from_service_account_json(
       'BlueLens-d8117bd9e6b1.json')
 
-  # query = 'SELECT * FROM stylelens.' + site_code
-  query = 'SELECT * FROM stylelens.8seconds LIMIT 30'
+  query = 'SELECT * FROM stylelens.' + site_code + ' LIMIT 1000'
+  # query = 'SELECT * FROM stylelens.8seconds LIMIT 30'
+  # query = 'SELECT * FROM stylelens.8seconds LIMIT 1000'
 
+  print(client)
   query_job = client.run_async_query(str(uuid.uuid4()), query)
 
   query_job.begin()
@@ -88,6 +91,7 @@ def job(info):
 
     if i % SPAWNING_CRITERIA == 0:
       spawn_cropper(str(uuid.uuid4()))
+      time.sleep(60)
     i = i + 1
 
 def push_image_to_queue(image_info):
