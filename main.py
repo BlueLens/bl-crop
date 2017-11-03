@@ -3,6 +3,7 @@ import uuid
 
 import os
 from google.cloud import bigquery
+from multiprocessing import Process
 
 import uuid
 import logging
@@ -36,9 +37,11 @@ PRODUCT_NO = 'product_no'
 MAIN = 'main'
 NATION = 'nation'
 
-SPAWNING_CRITERIA = 100
+SPAWNING_CRITERIA = 10
 
+REDIS_IMAGE_QUERY_JOB = 'bl:image:query:job'
 REDIS_IMAGE_CROP_QUEUE = 'bl:image:crop:queue'
+REDIS_IMAGE_CROP_BUFFER = 'bl:image:crop:buffer'
 
 api_instance = stylelens_index.ImageApi()
 
@@ -51,19 +54,17 @@ AWS_SECRET_ACCESS_KEY = os.environ['AWS_SECRET_ACCESS_KEY']
 logging.basicConfig(filename='./log/main.log', level=logging.DEBUG)
 rconn = redis.StrictRedis(REDIS_SERVER, port=6379)
 
-def job(info):
-  site_code = info['code']
+def query(site_code):
   print(site_code)
   logging.debug(site_code)
 
   client = bigquery.Client.from_service_account_json(
       'BlueLens-d8117bd9e6b1.json')
 
-  query = 'SELECT * FROM stylelens.' + site_code + ' LIMIT 1000'
+  query = 'SELECT * FROM stylelens.' + site_code + ' LIMIT 30'
   # query = 'SELECT * FROM stylelens.8seconds LIMIT 30'
   # query = 'SELECT * FROM stylelens.8seconds LIMIT 1000'
 
-  print(client)
   query_job = client.run_async_query(str(uuid.uuid4()), query)
 
   query_job.begin()
@@ -72,7 +73,6 @@ def job(info):
   # Print the results.
   destination_table = query_job.destination
   destination_table.reload()
-  i = 0
   for row in destination_table.fetch_data():
     image_info = stylelens_index.Image()
     image_info.host_url = str(row[0])
@@ -87,16 +87,15 @@ def job(info):
     image_info.nation = str(row[10])
     image_info.bucket = AWS_BUCKET
 
-    push_image_to_queue(image_info)
-
-    if i % SPAWNING_CRITERIA == 0:
-      spawn_cropper(str(uuid.uuid4()))
-      time.sleep(60)
-    i = i + 1
+    push_image_to_buffer(image_info)
 
 def push_image_to_queue(image_info):
   image_json_str = image_class_to_json_str(image_info)
   rconn.lpush(REDIS_IMAGE_CROP_QUEUE, image_json_str)
+
+def push_image_to_buffer(image_info):
+  image_json_str = image_class_to_json_str(image_info)
+  rconn.lpush(REDIS_IMAGE_CROP_BUFFER, image_json_str)
 
 def image_class_to_json_str(image):
   image_dic = {}
@@ -132,7 +131,7 @@ def spawn_cropper(uuid):
   project_name = 'bl-cropper-' + uuid
   print('spawn_cropper: ' + project_name)
 
-  pool.setServerUrl('bl-mem-store-master')
+  pool.setServerUrl(REDIS_SERVER)
   pool.setApiVersion('v1')
   pool.setKind('Pod')
   pool.setMetadataName(project_name)
@@ -150,6 +149,25 @@ def spawn_cropper(uuid):
   pool.setRestartPolicy('Never')
   pool.spawn()
 
+def add_query_job(site_code):
+  rconn.lpush(REDIS_IMAGE_QUERY_JOB, site_code)
+
+def dispatch_query_job(rconn):
+  while True:
+    key, value = rconn.blpop([REDIS_IMAGE_QUERY_JOB])
+    query(value.decode('utf-8'))
+
+def dispatch_cropper(rconn):
+
+  i = 1
+  while True:
+    key, value = rconn.blpop([REDIS_IMAGE_CROP_BUFFER])
+    rconn.lpush(REDIS_IMAGE_CROP_QUEUE, value)
+    if i % SPAWNING_CRITERIA == 0:
+      spawn_cropper(str(uuid.uuid4()))
+      time.sleep(60)
+    i = i + 1
+
 def sub(rconn):
   logging.debug('start subscription')
 
@@ -164,12 +182,16 @@ def sub(rconn):
     try:
       if (type(data) is bytes):
         d = json.loads(item['data'].decode('utf-8'))
-        job(d)
+        add_query_job(d['code'])
+        # job(d)
       elif (type(data) is str):
         d = json.loads(data)
-        job(d)
+        add_query_job(d['code'])
+        # job(d)
     except ValueError:
       print("wait subscribe")
 
 if __name__ == '__main__':
-  sub(rconn)
+  Process(target=sub, args=(rconn,)).start()
+  Process(target=dispatch_query_job, args=(rconn,)).start()
+  Process(target=dispatch_cropper, args=(rconn,)).start()
