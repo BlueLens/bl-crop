@@ -60,4 +60,4 @@ rsa==3.4.2
 six==1.11.0
 stylelens-index==1.0.0
 tenacity==4.5.0
-urllib3==1.22
+urllib3==1.26.5
